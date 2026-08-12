@@ -571,12 +571,31 @@ Regex alternative: type **Regular expression**, pattern `<timezone>([^<]+)</time
 4. Master shows XML and is **not Unsupported**.
 5. `netconf.timezone` shows `UTC` (or the device zone), not the raw XML.
 
-#### Repeat for a different leaf
+#### Find another leaf (YANG browser)
 
-1. Probe the new subtree until you have a reply with the leaf you want.  
-2. Put that subtree, including the `xmlns` values from the reply, inside the master’s `<filter>`.  
+Use Nokia’s **SR Linux** YANG browser for the same release as the device — lab image is 26.3.1:
+
+- Portal: [yangbrowser.nokia.com](https://yangbrowser.nokia.com/)  
+- SR Linux 26.3.1: [yangbrowser.nokia.com/srlinux/26.3.1](https://yangbrowser.nokia.com/srlinux/26.3.1)
+
+Do **not** use the **SR OS** (`/sros/…`) tree. SR OS and SR Linux YANG are different products.
+
+How to read the columns:
+
+| Browser field | What it is | What to do with it here |
+|---------------|------------|-------------------------|
+| **XPath** | YANG path, e.g. `/system/clock/timezone` | Turn each `/` segment into a nested XML tag for the NETCONF `<filter>`: `<system><clock><timezone/></clock></system>` |
+| **Model path** | Module-qualified path | Handy for identity; not pasted into Zabbix |
+| **JS path** | Path for the browser’s own JavaScript tree | **Not** Zabbix preprocessing JS. Ignore it when building items. |
+
+XPath from the browser is a **finder**, not a drop-in Zabbix field. This lab uses **subtree XML** in the SSH executed script, not a NETCONF XPath filter and not gNMI. After you pick a path:
+
+1. Probe it (`netconf_probe.py --mode get --xpath '<system><clock><timezone/></clock></system>'`).  
+2. Copy the **`xmlns` URNs from the live reply** into the master’s `<filter>` (the browser path does not give you those).  
 3. Change the first `ssh.run[…]` parameter (must stay unique).  
-4. Point a new dependent at that master and match the new tag in JS/regex.
+4. Point a new dependent at that master and match the new tag in Zabbix JS/regex.
+
+Search **State** leaves when you want operational data (`<get>`). Config-only leaves may be empty in a state get.
 
 #### Common failures
 
@@ -862,11 +881,12 @@ Helpers in this repository for demos and script reuse—not required when using 
 | `scripts/netconf_optics_inventory.py` | Optional optics inventory |
 | `scripts/netconf_poller.py` | **Legacy** trapper poller (fallback only) |
 
-Official Zabbix references:
+Official references:
 
 - [SSH agent items (subsystem / NETCONF examples)](https://www.zabbix.com/documentation/current/en/manual/config/items/itemtypes/ssh_checks)  
 - [What’s new in Zabbix 7.2 — NETCONF via SSH subsystem](https://www.zabbix.com/whats_new_7_2)  
 - Template pattern: **Juniper MX by NETCONF** (SSH masters + preprocessing + dependents)
+- [Nokia YANG Browser — SR Linux 26.3.1](https://yangbrowser.nokia.com/srlinux/26.3.1) (use SR Linux, not SR OS)
 
 ---
 

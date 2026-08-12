@@ -237,7 +237,15 @@ Click **Add**.
    - `NETCONF: Get timezone (raw)` — a blob of XML, status not **Unsupported**
    - `NETCONF timezone` — **`UTC`**
 
-That is the whole pattern. For a different leaf: probe it, put that subtree (with the namespaces from the reply) in the master’s `<filter>`, give the `ssh.run[…]` a new first parameter, and change the JS to match the new tag.
+That is the whole pattern. For a different leaf: find it in the
+[SR Linux 26.3.1 YANG browser](https://yangbrowser.nokia.com/srlinux/26.3.1)
+(not the SR OS tree), probe it, put that subtree (with the namespaces from
+the reply) in the master’s `<filter>`, give the `ssh.run[…]` a new first
+parameter, and change the JS to match the new tag.
+
+The browser’s **XPath** is the leaf location (`/system/clock/timezone` →
+`<system><clock><timezone/></clock></system>`). Its **JS path** is for the
+browser UI, not Zabbix preprocessing. Always probe before creating the item.
 
 Production field notes and failure table: [admin guide §7.6](./ZABBIX-NETCONF-ADMIN-GUIDE.md#76-add-a-new-check-recipe).
 
