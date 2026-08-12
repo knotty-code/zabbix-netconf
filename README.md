@@ -127,10 +127,10 @@ python3 scripts/netconf_probe.py \
   --mode get --xpath '<system><clock><timezone/></clock></system>'
 ```
 
-Expected reply (namespaces matter — copy them into the RPC):
+Expected reply (pretty-printed). Read it as a path, not as a blob:
 
 ```xml
-<data …>
+<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
   <system xmlns="urn:nokia.com:srlinux:general:system">
     <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
       <timezone>UTC</timezone>
@@ -138,6 +138,18 @@ Expected reply (namespaces matter — copy them into the RPC):
   </system>
 </data>
 ```
+
+| Piece | What it is | What you do with it |
+|-------|------------|---------------------|
+| `<data …>` | NETCONF wrapper. Always there on a successful `<get>`. | Ignore. Do not put `<data>` in the filter. |
+| `<system xmlns="urn:nokia.com:srlinux:general:system">` | First YANG container + its module URN. | Copy **tag + xmlns** into the executed-script `<filter>`. |
+| `<clock xmlns="urn:nokia.com:srlinux:linux:ntp">` | Child container + its module URN. | Same — nest it under `<system>`. |
+| `<timezone>UTC</timezone>` | The **leaf**. Tag = name, `UTC` = the metric. | This is what the dependent item extracts. JS/regex match `<timezone>([^<]+)</timezone>` → `UTC`. |
+| `rpc-error` / empty `<data/>` | Failed or unmatched filter. | Do not build an item yet. Fix the filter / namespace. |
+
+You are hunting for **one leaf** (`timezone`) and the **xmlns on each ancestor**. Everything else is scaffolding.
+
+Zabbix **Test** on the master is noisier than the probe: you may also see a server `<hello>`, `<rpc-reply>`, and `]]>]]>` markers. That is still a pass if `<timezone>UTC</timezone>` is inside. Fail if you see `<rpc-error>` or `#` chunk headers (that means NETCONF 1.1 framing).
 
 #### 1. Open the host’s item list
 

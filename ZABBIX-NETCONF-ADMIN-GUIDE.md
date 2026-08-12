@@ -262,6 +262,59 @@ Prefer **bare** subtree filters:
 
 Avoid inventing YANG namespace URIs unless you know the exact URN—incorrect namespaces often return `Unknown namespace`.
 
+### 6.4 How to read the XML
+
+A NETCONF `<get>` reply is a tree. You care about three things: **wrapper**, **path + namespaces**, **leaf value**.
+
+Live lab example (`srl1`, timezone):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"
+      xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <system xmlns="urn:nokia.com:srlinux:general:system">
+    <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+      <timezone>UTC</timezone>
+    </clock>
+  </system>
+</data>
+```
+
+| You see | Meaning | Action |
+|---------|---------|--------|
+| `<?xml …?>` and `<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">` | Session/protocol wrapper. Present on every successful get. | Ignore. Never put `<data>` in a subtree filter. |
+| `<system xmlns="urn:nokia.com:srlinux:general:system">` | YANG container `system` from that module. | Copy **both** the tag name and this `xmlns` into the filter. |
+| `<clock xmlns="urn:nokia.com:srlinux:linux:ntp">` | Child container; SR Linux often changes module at this layer. | Copy tag + this `xmlns` too. A missing or guessed URN is the usual empty-`<data/>` cause. |
+| `<timezone>UTC</timezone>` | **Leaf.** Left side is the name, right side (`UTC`) is the value you will store in Zabbix. | Dependent preprocessing: match this tag, return the text. |
+| Nesting `system → clock → timezone` | Same as YANG XPath `/system/clock/timezone`. | Filter XML is that path written as nested tags. |
+| `<rpc-error>` | Device rejected the RPC (bad namespace, bad filter, AAA). | Stop. Fix the request; do not parse this as a metric. |
+| `<data/>` with no children | Filter matched nothing. | Bare the filter or correct xmlns, then probe again. |
+
+**What to copy into the Zabbix executed-script `<filter>`** (path + live xmlns, no `<data>`):
+
+```xml
+<system xmlns="urn:nokia.com:srlinux:general:system">
+  <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+    <timezone/>
+  </clock>
+</system>
+```
+
+An empty `<timezone/>` in the **filter** means “return this leaf.” A filled `<timezone>UTC</timezone>` in the **reply** is the value.
+
+**Probe vs Zabbix Test.** `netconf_probe.py` prints the `<data>` subtree. Zabbix SSH Test prints the whole session: server `<hello>`, `<rpc-reply message-id="1">…</rpc-reply>`, `<ok/>` from `close-session`, and `]]>]]>` after each message. Still a pass if the leaf text is present. Fail if you see `<rpc-error>` or lines starting with `#` (NETCONF 1.1 chunked framing — hello advertised 1.1).
+
+**What the dependent item looks at.** The master value is that whole string. Preprocessing does not “understand YANG.” It searches the text for the leaf tag:
+
+```javascript
+// value = entire master XML (hello, rpc-reply, data, …)
+var m = value.match(/<timezone>([^<]+)<\/timezone>/);
+if (m) return m[1].trim();   // "UTC"
+return value.slice(0, 200);  // debug: first 200 chars if the tag is missing
+```
+
+If the fallback 200 characters is what Latest data shows, the leaf tag was not in the master XML.
+
 ---
 
 ## 7. Configure Zabbix — native SSH + NETCONF (primary)
@@ -445,19 +498,19 @@ return n;
 
 Do this in the **Zabbix UI**. You will create two items on one host: an SSH master that returns XML, and a dependent that stores one parsed leaf. There is no menu item named “NETCONF”.
 
-Worked example: **system timezone**. Live lab reply (SR Linux 26.3) is:
+Worked example: **system timezone**. Read the live reply with §6.4 before you click in the UI.
 
 ```xml
 <data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
-  <system xmlns="urn:nokia.com:srlinux:general:system">
-    <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
-      <timezone>UTC</timezone>
+  <system xmlns="urn:nokia.com:srlinux:general:system">   <!-- copy into filter -->
+    <clock xmlns="urn:nokia.com:srlinux:linux:ntp">       <!-- copy into filter -->
+      <timezone>UTC</timezone>                           <!-- extract "UTC" -->
     </clock>
   </system>
 </data>
 ```
 
-Copy those **xmlns** values into the RPC filter. Do not invent URNs.
+Copy those **xmlns** values into the RPC filter. Do not invent URNs. The metric is only the text inside `<timezone>`.
 
 #### 1. Confirm the leaf (probe)
 
@@ -529,8 +582,9 @@ Hello must announce **only** `base:1.0`. If you also advertise 1.1, the device u
 Then:
 
 1. **Test → Get value and test**.
-2. Pass = XML containing `<timezone>UTC</timezone>` (or another zone name).
-3. Close Test → **Add**.
+2. Pass = the returned text contains `<timezone>UTC</timezone>` (or another zone name), even if wrapped in `<hello>` / `<rpc-reply>` / `]]>]]>`.
+3. Fail = `<rpc-error>`, empty `<data/>`, or `#` chunk lines. See §6.4.
+4. Close Test → **Add**.
 
 Do not create the dependent until Test succeeds.
 
@@ -858,7 +912,7 @@ Key:          ssh.run[<unique>,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]
 Script:       client hello base:1.0 + <rpc>...</rpc> + ]]>]]> + close-session
 Port:         22 (typical when netconf-server bound to ssh-server mgmt)
 Enable:       system netconf-server <name> { admin-state enable; ssh-server <ssh>; }
-Parse:        Preprocessing + dependent items (regex / JS / JSONPath)
+Parse:        Find the leaf tag in the XML; JS/regex extracts its text (§6.4)
 Fallback:     ncclient poller → trapper only if Zabbix < 7.2
 Optics:       Start with presence; add DOM/DCO when pluggables exist
 UI check:     Monitoring → Latest data · items not Unsupported
