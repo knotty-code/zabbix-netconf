@@ -177,7 +177,26 @@ Set these fields. Leave anything not listed at the default.
 
 The sixth key parameter must be the literal word `netconf`. The first parameter (`SrlTimezone`) must be unique on this host.
 
-**Executed script** — paste *all* of this, including every `]]>]]>` line:
+**Executed script** is three NETCONF messages taped together. It is not a shell script. Each message **must** end with the six characters `]]>]]>` on their own line (end-of-message). Zabbix sends this as-is over the `netconf` SSH subsystem.
+
+```
+message 1: <hello> …          we speak NETCONF 1.0 only
+]]>]]>
+message 2: <rpc><get>…        ask for one YANG subtree
+]]>]]>
+message 3: <rpc><close-session/>   hang up cleanly
+]]>]]>
+```
+
+| Block | What it is | What you change |
+|-------|------------|-----------------|
+| `<hello>…<capability>urn:ietf:params:netconf:base:1.0</capability>` | Client greeting. **Only** `base:1.0` so framing stays `]]>]]>` (1.1 uses `#` chunks and breaks JS). | Leave as-is on every check. |
+| `]]>]]>` | End of that message. Required after hello, after get, after close. | Never delete these lines. |
+| `<rpc … message-id="1"><get><filter type="subtree">` | “Return operational state matching this tree.” | Keep `<get>` / `<filter>`. Swap only the inner tags. |
+| `<system xmlns="…"><clock xmlns="…"><timezone/></clock></system>` | The **ask**. Nested tags = YANG path. Empty `<timezone/>` means “give me this leaf.” `xmlns` comes from the probe reply. | This is the only part that changes per check. |
+| `<rpc … message-id="2"><close-session/>` | Close the NETCONF session. | Leave as-is. Bump `message-id` only if you add more RPCs. |
+
+Paste *all* of this, including every `]]>]]>` line:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

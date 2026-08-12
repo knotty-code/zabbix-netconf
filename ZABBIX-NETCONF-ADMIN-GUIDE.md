@@ -370,22 +370,58 @@ Create an item of type **SSH agent**:
 
 ### 7.4 Executed script: NETCONF RPC framing
 
-For subsystem `netconf`, the **Executed script** is **not** a shell command. It is one or more **RPC documents**, each terminated by **`]]>]]>`**.
+For subsystem `netconf`, the **Executed script** is **not** a shell command. It is **three NETCONF messages concatenated**, each terminated by the six characters **`]]>]]>`** (end-of-message). Zabbix writes this stream to the SSH `netconf` subsystem.
 
-**Official multi-RPC shape (from Zabbix docs, Juniper-style RPC names shown as example):**
+```
+<hello> … base:1.0 … </hello>     message 1 — who we are
+]]>]]>
+<rpc message-id="1"><get>…</get></rpc>   message 2 — the ask
+]]>]]>
+<rpc message-id="2"><close-session/></rpc>   message 3 — hang up
+]]>]]>
+```
+
+Read a timezone script like this:
 
 ```xml
-<rpc>
-  <get-software-information/>
+<?xml version="1.0" encoding="UTF-8"?>
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <!-- announce ONLY 1.0 — do not add a 1.1 capability -->
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>
+]]>]]>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
+  <get>                          <!-- operational state (not <get-config>) -->
+    <filter type="subtree">      <!-- "return this tree", not a full device dump -->
+      <!-- only this inner block changes per check: path + xmlns from the probe -->
+      <system xmlns="urn:nokia.com:srlinux:general:system">
+        <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+          <timezone/>            <!-- empty tag = "return this leaf" -->
+        </clock>
+      </system>
+    </filter>
+  </get>
 </rpc>
 ]]>]]>
-<rpc>
-  <close-session/>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="2">
+  <close-session/>               <!-- always close; SRL expects it -->
 </rpc>
 ]]>]]>
 ```
 
-**SR Linux note:** devices often advertise NETCONF **1.0 and 1.1**. Prefer a **client hello that announces only base:1.0** so message framing stays `]]>]]>` (1.1 uses chunked framing). Always end with `<close-session/>`.
+| Block | Meaning | Edit? |
+|-------|---------|-------|
+| `<hello>` + single `base:1.0` capability | Client greeting. 1.0 keeps `]]>]]>` framing. If you also list 1.1, the device switches to `#` chunked framing and Zabbix JS will not see `<timezone>`. | No — same on every item. |
+| `]]>]]>` (three times) | End of that message. Missing one and the device waits until timeout. | No — never delete. |
+| `<rpc message-id="1"><get><filter type="subtree">` | One operational get, limited to the inner tree. | Keep the wrapper. |
+| Inner tags + `xmlns` | The YANG path you want. Empty `<timezone/>` asks for the leaf; the reply comes back as `<timezone>UTC</timezone>`. | **Yes** — this is the check. Copy xmlns from the live probe (§6.4). |
+| `<rpc message-id="2"><close-session/>` | Tear down the session. | No. New RPCs get new `message-id`s before this. |
+
+**SR Linux note:** devices advertise NETCONF **1.0 and 1.1**. The **client** hello must announce **only** `base:1.0`. Always end with `<close-session/>`.
+
+Official Zabbix docs show the same multi-RPC idea with vendor-specific inner RPCs (e.g. Juniper `<get-software-information/>`). On SR Linux the inner RPC is a namespaced `<get>` + subtree filter.
 
 **SR Linux-oriented baseline — hostname (operational state):**
 
@@ -549,7 +585,7 @@ Selecting **Type = SSH agent** reveals Username, Password, and Executed script.
 
 Key rules: first parameter (`SrlTimezone`) is unique **per host**; sixth parameter is the literal `netconf`; do not omit the empty encoding/options commas.
 
-**Executed script** — paste the entire block, including every `]]>]]>` line. This is not a shell command.
+**Executed script** — paste the entire block, including every `]]>]]>` line. How to read it: §7.4 (three messages: hello / get / close). This is not a shell command.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -909,7 +945,7 @@ Platform:     Nokia SR Linux
 Native:       Zabbix ≥ 7.2 — NETCONF via SSH subsystem (built-in; no external poller)
 UI type:      SSH agent  (not a separate "NETCONF" type name)
 Key:          ssh.run[<unique>,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]
-Script:       client hello base:1.0 + <rpc>...</rpc> + ]]>]]> + close-session
+Script:       hello (1.0 only) + ]]>]]> + <get> filter + ]]>]]> + close-session + ]]>]]>
 Port:         22 (typical when netconf-server bound to ssh-server mgmt)
 Enable:       system netconf-server <name> { admin-state enable; ssh-server <ssh>; }
 Parse:        Find the leaf tag in the XML; JS/regex extracts its text (§6.4)
