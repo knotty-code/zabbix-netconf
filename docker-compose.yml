@@ -1,0 +1,121 @@
+# Zabbix lab stack — native NETCONF (SSH subsystem) for Magic Kingdom X1b bleafs
+# Web UI: http://localhost:8080  (Admin / zabbix)
+#
+# Requires Zabbix ≥ 7.2 (subsystem parameter on SSH items).
+# Start:  docker compose up -d
+# Stop:   docker compose down
+#
+# After first start (or upgrade from 7.0):
+#   python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
+#
+# Note: upgrading major Zabbix images against an old Postgres volume auto-migrates
+# schema on server start. If the UI fails after a major jump, recreate the volume:
+#   docker compose down -v && docker compose up -d
+
+name: zabbix-netconf
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zabbix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      POSTGRES_DB: zabbix
+    volumes:
+      - zabbix-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix -d zabbix"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - zabbix-net
+
+  zabbix-server:
+    # 7.2+ required for ssh.run[...,netconf]; use current 7.4 line
+    image: zabbix/zabbix-server-pgsql:alpine-7.4-latest
+    container_name: zabbix-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      POSTGRES_DB: zabbix
+      ZBX_STARTPOLLERS: "5"
+      ZBX_STARTTRAPPERS: "3"
+      # SSH agent pollers — required for native NETCONF subsystem items
+      ZBX_STARTSSH: "5"
+      # Global Timeout (seconds, 1–30). NETCONF hello+RPC needs more than default 3s.
+      ZBX_TIMEOUT: "30"
+      ZBX_CACHESIZE: 128M
+      ZBX_STARTVMWARECOLLECTORS: "0"
+      # Optional: directory for public-key auth (password used in lab)
+      # ZBX_SSHKEYLOCATION: /var/lib/zabbix/ssh_keys
+    volumes:
+      - ./externalchecks:/usr/lib/zabbix/externalscripts:ro
+      - ./scripts:/scripts:ro
+    ports:
+      - "10051:10051"
+    extra_hosts:
+      - "bleaf1.magic-kingdom.io:172.30.40.21"
+      - "bleaf2.magic-kingdom.io:172.30.40.22"
+    networks:
+      - zabbix-net
+      - magic-kingdom-mgmt
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.4-latest
+    container_name: zabbix-web
+    restart: unless-stopped
+    depends_on:
+      - zabbix-server
+      - postgres
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: postgres
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix
+      POSTGRES_DB: zabbix
+      PHP_TZ: UTC
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "bleaf1.magic-kingdom.io:172.30.40.21"
+      - "bleaf2.magic-kingdom.io:172.30.40.22"
+    networks:
+      - zabbix-net
+      - magic-kingdom-mgmt
+
+  # Optional offline tools (ncclient probes only — not in the data path)
+  netconf-tools:
+    image: python:3.12-slim
+    container_name: zabbix-netconf-tools
+    profiles: ["tools"]
+    working_dir: /scripts
+    volumes:
+      - ./scripts:/scripts:ro
+    command: >
+      bash -c "pip install --no-cache-dir -q ncclient lxml paramiko &&
+               sleep infinity"
+    extra_hosts:
+      - "bleaf1.magic-kingdom.io:172.30.40.21"
+      - "bleaf2.magic-kingdom.io:172.30.40.22"
+    networks:
+      - zabbix-net
+      - magic-kingdom-mgmt
+
+networks:
+  zabbix-net:
+    driver: bridge
+  # containerlab Magic Kingdom management network (external)
+  magic-kingdom-mgmt:
+    external: true
+    name: magic-kingdom-mgmt
+
+volumes:
+  zabbix-postgres-data:
