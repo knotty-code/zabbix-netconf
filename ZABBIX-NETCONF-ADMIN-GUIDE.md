@@ -441,7 +441,151 @@ return n;
 | `net.tcp.service[ssh,{$NETCONF.IP},{$NETCONF.PORT}]` | Simple check | Port open |
 | Master SSH item not unsupported | Built-in | Session + RPC succeeded |
 
-### 7.6 Suggested starter item set
+### 7.6 Add a new check (recipe)
+
+This section is the walkthrough. §7.3–§7.5 are the field reference. The example below is **system timezone** — a leaf that is **not** in the starter set — so the steps stay visible.
+
+**What you are adding:** one master item that GETs `/system/clock/timezone`, and one dependent item `netconf.timezone` that stores the parsed string.
+
+#### 1. See the live XML first
+
+Run the probe from the same host that will poll (Zabbix server/proxy, or the lab `netconf-tools` container). Prefer a **bare** subtree filter until you know the URN (§6.3):
+
+```bash
+python3 scripts/netconf_probe.py \
+  --host <MGMT_IP> --port 22 \
+  --user <USER> --password '<SECRET>' \
+  --mode get --xpath '<system><clock><timezone/></clock></system>'
+```
+
+You should see a `<timezone>…</timezone>` value (for example `UTC` or `America/Los_Angeles`). If the reply is an `rpc-error` or empty `<data/>`, change the filter — do not invent namespace URIs.
+
+#### 2. Create the SSH master in the UI
+
+**Data collection → Hosts →** the device **→ Items → Create item**
+
+| Field | Value |
+|-------|--------|
+| **Name** | `NETCONF: Get timezone (raw)` |
+| **Type** | SSH agent |
+| **Key** | `ssh.run[SrlTimezone,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]` |
+| **Username** | `{$NETCONF.USER}` |
+| **Authentication method** | Password |
+| **Password** | `{$NETCONF.PASSWORD}` |
+| **Type of information** | Text |
+| **Update interval** | `5m` |
+| **Timeout** | `30s` (server `Timeout` / `ZBX_TIMEOUT` must be at least this) |
+| **Executed script** | The block below — paste the whole thing |
+
+The first key parameter (`SrlTimezone`) must be **unique on this host**. The sixth parameter must be **`netconf`**.
+
+**Executed script** (same framing as `rpc_get()` in `scripts/zabbix_register_hosts.py`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>
+]]>]]>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
+  <get>
+    <filter type="subtree">
+      <system>
+        <clock>
+          <timezone/>
+        </clock>
+      </system>
+    </filter>
+  </get>
+</rpc>
+]]>]]>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="2">
+  <close-session/>
+</rpc>
+]]>]]>
+```
+
+Announce **only** `base:1.0` in the hello. If the client also claims 1.1, the session uses chunked framing and the `]]>]]>` markers (and your regex) will not match.
+
+Use **Test** on the item. A good result is XML containing `<timezone>`. Then save.
+
+#### 3. Create the dependent item
+
+On the same host: **Create item**, type **Dependent item**, master = `NETCONF: Get timezone (raw)`.
+
+| Field | Value |
+|-------|--------|
+| **Name** | `NETCONF timezone` |
+| **Type** | Dependent item |
+| **Key** | `netconf.timezone` |
+| **Type of information** | Character |
+| **Master item** | `NETCONF: Get timezone (raw)` |
+
+**Preprocessing** — one JavaScript step:
+
+```javascript
+var m = value.match(/<timezone>([^<]+)<\/timezone>/);
+if (m) return m[1].trim();
+return value.slice(0, 200);
+```
+
+Regex alternative: pattern `<timezone>([^<]+)</timezone>`, output `\1`.
+
+#### 4. Confirm it works
+
+1. **Monitoring → Latest data** for the host.  
+2. Master `ssh.run[SrlTimezone,…]` updates and is **not Unsupported**.  
+3. `netconf.timezone` shows the parsed zone, not the raw XML.
+
+#### Common failures
+
+| Symptom | Likely cause |
+|---------|----------------|
+| Master **Unsupported** / timeout | `ZBX_TIMEOUT` too low; filter too wide; NETCONF not enabled |
+| Empty `<data/>` or `Unknown namespace` | Wrong or invented YANG URN — start with a bare filter |
+| Regex/JS returns garbage or chunk headers | Hello advertised **1.1**; announce **only** `base:1.0` |
+| Reply is truncated / item error | Missing `]]>]]>` after each RPC, or no `<close-session/>` |
+| “Item already exists” | First `ssh.run[…]` parameter not unique on the host |
+
+Per-interface or per-optic checks are the same pattern plus **LLD** later (§13). Do not start there.
+
+#### Persist it in the lab
+
+The UI items disappear if you wipe the Zabbix DB. To recreate them with `zabbix_register_hosts.py`, add a filter and a JS snippet next to the existing `RPC_*` / `JS_*` constants, then call the same helpers used for hostname:
+
+```python
+RPC_TIMEZONE = rpc_get("<system><clock><timezone/></clock></system>")
+JS_TIMEZONE = r"""
+var m = value.match(/<timezone>([^<]+)<\/timezone>/);
+if (m) return m[1].trim();
+return value.slice(0, 200);
+""".strip()
+```
+
+In `ensure_items()`:
+
+```python
+mid_tz = create_ssh_master(
+    api, hostid,
+    name="NETCONF: Get timezone (raw)",
+    key_desc="SrlTimezone",
+    params=RPC_TIMEZONE,
+    delay="5m",
+)
+create_dependent(
+    api, hostid, mid_tz,
+    name="NETCONF timezone",
+    key="netconf.timezone",
+    value_type=VT_CHAR,
+    preprocessing=[_pp_js(JS_TIMEZONE)],
+)
+```
+
+Re-run `python3 scripts/zabbix_register_hosts.py --url http://localhost:8080`. That script **replaces** existing `netconf.*` / `ssh.run[Srl…]` items on the host unless you pass `--keep-legacy`.
+
+### 7.7 Suggested starter item set
 
 | Purpose | Approach | Notes |
 |---------|----------|-------|
@@ -454,7 +598,7 @@ return n;
 
 Template name suggestion: **Template Nokia SR Linux NETCONF (SSH)**.
 
-### 7.7 Triggers (initial)
+### 7.8 Triggers (initial)
 
 | Name | Idea | Severity |
 |------|------|----------|
@@ -465,7 +609,7 @@ Template name suggestion: **Template Nokia SR Linux NETCONF (SSH)**.
 
 Suppress noisy “all cages empty” alerts on simulators.
 
-### 7.8 Templates and scale
+### 7.9 Templates and scale
 
 1. Create the template with macros and SSH master items.  
 2. Add dependent items and triggers on the template.  
@@ -473,7 +617,7 @@ Suppress noisy “all cages empty” alerts on simulators.
 4. Export YAML/XML into GitOps / backup.  
 5. Study official **Juniper MX by NETCONF** as a structural reference (SSH masters + JS preprocess + dependent items + LLD)—vendor RPCs differ, pattern does not.
 
-### 7.9 UI verification
+### 7.10 UI verification
 
 1. Open **Monitoring → Latest data** for the host.  
 2. Confirm master SSH items update and are not **Unsupported**.  
@@ -629,6 +773,7 @@ show version
 
 | Goal | Approach |
 |------|----------|
+| One extra leaf / metric | §7.6 recipe (master SSH item + dependent parse) |
 | Many X1bs | Template + API/Ansible host create + macro fill |
 | Per-port optics | LLD from JS preprocessing of transceiver XML |
 | Numeric DOM / DCO | Dependent float items + triggers |

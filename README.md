@@ -113,6 +113,31 @@ Legacy `scripts/netconf_poller.py` (trapper push) remains for Zabbix &lt; 7.2 on
 
 Macros: `{$NETCONF.IP}`, `{$NETCONF.PORT}`, `{$NETCONF.USER}`, `{$NETCONF.PASSWORD}`.
 
+To add another row, see **Add a check** below.
+
+### Add a check
+
+A NETCONF check is two Zabbix items: a master that fetches XML, and a dependent that parses one field.
+
+1. **Pick a small YANG subtree** (one leaf or container). Probe it first so you know the XML:
+
+   ```bash
+   python3 scripts/netconf_probe.py \
+     --host 172.30.50.11 --user admin --password 'NokiaSrl1!' \
+     --mode get --xpath '<system><clock><timezone/></clock></system>'
+   ```
+
+2. **Create an SSH agent master** on the host. Key:
+   `ssh.run[<unique name>,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]`  
+   Username / password = the `{$NETCONF.*}` macros.  
+   **Executed script** is not a shell command — it is a client hello + `<get>` + `]]>]]>` + `<close-session/>`.
+
+3. **Create a dependent item** on that master. Use JavaScript or regex preprocessing to pull one tag (for example `<timezone>…</timezone>`).
+
+4. Open **Monitoring → Latest data**. The master must not be **Unsupported**; the dependent should show the parsed value.
+
+Full field table, copy-paste RPC, and a timezone walkthrough: **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md#76-add-a-new-check-recipe)**.
+
 Register extra devices (or skip the lab defaults):
 
 ```bash
