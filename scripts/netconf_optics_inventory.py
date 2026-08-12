@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Inventory optics via NETCONF on SR Linux (X1b) devices.
+"""Inventory optics via NETCONF on SR Linux devices.
 
 Live lab note
 -------------
-Containerlab X1b sims typically report *all* cages as:
+Containerlab SR Linux sims typically report *all* cages as:
   oper-state=down, oper-down-reason=not-present
 so DDM/DOM leaves (power, temp, vendor, …) are absent until a real optic is present
 (or a higher-fidelity sim). The YANG model still exposes the full leaf set — this

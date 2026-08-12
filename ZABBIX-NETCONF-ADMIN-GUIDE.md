@@ -1,11 +1,11 @@
-# Zabbix administrator guide: Onboarding Nokia 7250 IXR-X1b with NETCONF
+# Zabbix administrator guide: Onboarding Nokia SR Linux with NETCONF
 
-**Audience:** Zabbix administrators operating an **existing** Zabbix deployment who need to monitor **Nokia 7250 IXR-X1b** (SR Linux) using **NETCONF**, without relying on SNMP.  
+**Audience:** Zabbix administrators operating an **existing** Zabbix deployment who need to monitor **Nokia SR Linux** using **NETCONF**, without relying on SNMP.  
 **Goal:** Enable the device, validate NETCONF, and collect metrics using **Zabbix’s native SSH + NETCONF subsystem** (7.2+), with a clear fallback path for older servers or bulk collectors.
 
 | | |
 |--|--|
-| **Platform** | Nokia 7250 IXR-X1b |
+| **Platform** | Nokia SR Linux |
 | **NOS** | SR Linux |
 | **Primary protocol** | NETCONF over SSH (subsystem `netconf`) |
 | **Primary Zabbix path** | **Native** (Zabbix ≥ 7.2): SSH agent + `ssh.run[...,netconf]` |
@@ -20,8 +20,8 @@
 This guide helps you:
 
 1. Use **native NETCONF monitoring** in **Zabbix 7.2 and later** (SSH item subsystem support).  
-2. Prepare an **X1b** for model-driven monitoring.  
-3. **Onboard one X1b** (or a small set) into an existing Zabbix server/proxy estate.  
+2. Prepare an **SR Linux** node for model-driven monitoring.  
+3. **Onboard one SR Linux node** (or a small set) into an existing Zabbix server/proxy estate.  
 4. Start with a **practical metric set** (reachability, identity, interfaces, optics presence) and extend later (DOM / DCO).  
 5. Know when to fall back to an **external poller** (Zabbix &lt; 7.2, heavy bulk inventory, or air-gapped jump hosts).
 
@@ -29,14 +29,14 @@ It is written for **customer production or lab Zabbix**, not as a requirement to
 
 ---
 
-## 2. Why NETCONF for X1b (and not SNMP)
+## 2. Why NETCONF for SR Linux (and not SNMP)
 
 | Topic | SNMP | NETCONF |
 |-------|------|---------|
 | **Native Zabbix collection (7.2+)** | SNMP agent items | **SSH agent + subsystem `netconf`** |
 | **Data contract** | MIB / OID | YANG modules → hierarchical XML |
 | **Transport** | Typically UDP/161 | **SSH subsystem** (SR Linux often **TCP 22**, not classic 830) |
-| **X1b / SR Linux fit** | Often incomplete or operationally brittle | First-class model-driven read of **config + operational state** |
+| **SR Linux fit** | Often incomplete or operationally brittle | First-class model-driven read of **config + operational state** |
 | **Config vs state** | Mixed OIDs | Explicit datastores / state leaves via `<get>` / filters |
 
 **Fair operational statement:**  
@@ -77,8 +77,8 @@ Reference: [Zabbix SSH checks](https://www.zabbix.com/documentation/current/en/m
 
 ```
 ┌────────────────────┐   SSH subsystem netconf    ┌──────────────────┐
-│ Zabbix server or   │ ─────────────────────────► │ 7250 IXR-X1b     │
-│ active proxy       │   (typically TCP 22)       │ SR Linux         │
+│ Zabbix server or   │ ─────────────────────────► │ SR Linux         │
+│ active proxy       │   (typically TCP 22)       │                  │
 │ SSH pollers        │                            └──────────────────┘
 │ (StartSSH ≥ 1)     │
 └─────────┬──────────┘
@@ -107,7 +107,7 @@ Use when:
 - NETCONF must run from a **jump host** that is not a Zabbix proxy.
 
 ```
-NETCONF poller (ncclient) ──► X1b
+NETCONF poller (ncclient) ──► SR Linux
         │
         └── zabbix_sender / trapper ──► Zabbix server or proxy
 ```
@@ -118,7 +118,7 @@ This repository’s **lab** stack (repo root: `docker-compose.yml`, `lab/srl.cla
 
 | Pattern | Min Zabbix | When to use |
 |---------|------------|-------------|
-| **A. SSH agent + `netconf` subsystem** | **7.2** | **Default for production X1b onboarding** |
+| **A. SSH agent + `netconf` subsystem** | **7.2** | **Default for production SR Linux onboarding** |
 | B. Poller → trapper | Any | Legacy Zabbix, jump hosts, complex bulk scripts |
 | C. External check / Script item | Any | Few metrics; Python on server/proxy |
 | D. SSH to CLI only | Any | Not model-driven; avoid for optics/state trees |
@@ -133,19 +133,19 @@ This repository’s **lab** stack (repo root: `docker-compose.yml`, `lab/srl.cla
 |-------------|--------|
 | **Version** | **7.2 or later** for native NETCONF (this guide’s primary path) |
 | **SSH support** | Server/proxy built/packaged with **libssh** (recommended) or libssh2 |
-| **Pollers** | `StartSSH` ≥ 1 on the **server or proxy** that will dial the X1b (increase for many hosts) |
+| **Pollers** | `StartSSH` ≥ 1 on the **server or proxy** that will dial the device (increase for many hosts) |
 | **Permissions** | Create hosts, templates, items, macros, triggers |
 
 Confirm version in the UI (**Reports → System information** or Administration) or `zabbix_server -V`.
 
 ### 4.2 Network
 
-- [ ] Path from **Zabbix server or proxy** (the SSH poller) to the X1b **management address**.  
+- [ ] Path from **Zabbix server or proxy** (the SSH poller) to the device **management address**.  
 - [ ] **TCP 22** open for SSH/NETCONF (see §5—do not assume port **830**).  
 - [ ] If using proxies, assign the host to the **regional proxy** so SSH originates in-region.  
 - [ ] DNS or static mapping for the Zabbix technical host name.
 
-### 4.3 Device (X1b / SR Linux)
+### 4.3 Device (SR Linux)
 
 - [ ] Management IP and hostname known.  
 - [ ] SSH works with a monitoring identity.  
@@ -162,13 +162,13 @@ Confirm version in the UI (**Reports → System information** or Administration)
 
 ---
 
-## 5. Prepare the X1b: enable NETCONF (SR Linux)
+## 5. Prepare the device: enable NETCONF (SR Linux)
 
 ### 5.1 Confirm platform
 
 ```text
 show version
-# Expect SR Linux and chassis type consistent with 7250 IXR-X1b
+# Expect SR Linux
 ```
 
 ### 5.2 Enable NETCONF
@@ -678,7 +678,7 @@ Suppress noisy “all cages empty” alerts on simulators.
 
 1. Create the template with macros and SSH master items.  
 2. Add dependent items and triggers on the template.  
-3. Link to each X1b host; override macros per host.  
+3. Link to each SR Linux host; override macros per host.  
 4. Export YAML/XML into GitOps / backup.  
 5. Study official **Juniper MX by NETCONF** as a structural reference (SSH masters + JS preprocess + dependent items + LLD)—vendor RPCs differ, pattern does not.
 
@@ -691,7 +691,7 @@ Suppress noisy “all cages empty” alerts on simulators.
 
 ---
 
-## 8. End-to-end checklist: onboard one X1b (native path)
+## 8. End-to-end checklist: onboard one SR Linux node (native path)
 
 ### Phase A — Plan
 
@@ -702,7 +702,7 @@ Suppress noisy “all cages empty” alerts on simulators.
 
 ### Phase B — Device
 
-5. SSH to the X1b; confirm SR Linux / X1b.  
+5. SSH to the device; confirm SR Linux.  
 6. Enable `netconf-server` bound to mgmt SSH (§5).  
 7. Verify `oper-state up`.  
 8. Persist config in automation source of truth if applicable.
@@ -727,7 +727,7 @@ Suppress noisy “all cages empty” alerts on simulators.
 18. Document host in CMDB; note NETCONF owner.  
 19. Hand off to NOC with dashboard link.
 
-### Phase F — Next X1b
+### Phase F — Next device
 
 20. Enable NETCONF → macros → template link → verify Latest data.
 
@@ -794,7 +794,7 @@ Script on server/proxy: item type **External check**, key e.g. `netconf_get.sh[{
 | Item type SSH missing / unsupported key | Upgrade to **≥ 7.2**; confirm package includes SSH support |
 | SSH item unsupported: library | Server/proxy linked with libssh/libssh2 |
 | Cannot connect | Routing, ACL, credentials, mgmt network-instance; try from proxy host |
-| Works on 830 elsewhere, fails on X1b | Use **port 22**; confirm `netconf-server` + `ssh-server` |
+| Works on 830 elsewhere, fails on SR Linux | Use **port 22**; confirm `netconf-server` + `ssh-server` |
 | Auth fails | Username/password macros; key files under `SSHKeyLocation` |
 | Empty or error RPC reply | Filter namespaces; simplify subtree; test with `netconf_probe.py` |
 | `Unknown namespace` | Bare filters; no guessed YANG URNs |
@@ -839,10 +839,10 @@ show version
 | Goal | Approach |
 |------|----------|
 | One extra leaf / metric | §7.6 recipe (master SSH item + dependent parse) |
-| Many X1bs | Template + API/Ansible host create + macro fill |
+| Many devices | Template + API/Ansible host create + macro fill |
 | Per-port optics | LLD from JS preprocessing of transceiver XML |
 | Numeric DOM / DCO | Dependent float items + triggers |
-| Dashboards | Filter tags `monitor=netconf`, `platform=7250-IXR-X1b` |
+| Dashboards | Filter tags `monitor=netconf`, `platform=srlinux` |
 | gNMI | Separate collector; optional trapper or other pipeline |
 | Still on Zabbix 7.0 | Use §9 poller→trapper until upgrade to 7.2+ |
 
@@ -851,7 +851,7 @@ show version
 ## 14. Quick reference
 
 ```
-Platform:     Nokia 7250 IXR-X1b / SR Linux
+Platform:     Nokia SR Linux
 Native:       Zabbix ≥ 7.2 — NETCONF via SSH subsystem (built-in; no external poller)
 UI type:      SSH agent  (not a separate "NETCONF" type name)
 Key:          ssh.run[<unique>,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]
@@ -894,7 +894,7 @@ Official references:
 
 | | |
 |--|--|
-| **Title** | Zabbix administrator guide: Onboarding Nokia 7250 IXR-X1b with NETCONF |
+| **Title** | Zabbix administrator guide: Onboarding Nokia SR Linux with NETCONF |
 | **Primary method** | Zabbix ≥ 7.2 SSH agent + subsystem `netconf` |
 | **Intended use** | Customer Zabbix operations / professional services runbook |
 | **Related lab** | Two-node SR Linux containerlab in this repo (`lab/srl.clab.yml`) |

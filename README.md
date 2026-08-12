@@ -4,7 +4,7 @@ Native **Zabbix ≥ 7.2** NETCONF monitoring (SSH agent + subsystem `netconf`) f
 
 | Doc | Purpose |
 |-----|---------|
-| **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md)** | Customer/admin guide: onboard SR Linux (including 7250 IXR-X1b) to an **existing** Zabbix estate |
+| **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md)** | Customer/admin guide: onboard SR Linux to an **existing** Zabbix estate |
 | **This README** | Lab/demo stack quick start |
 
 **Primary path:** `ssh.run[...,netconf]` — no external poller required on Zabbix 7.2+.  

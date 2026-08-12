@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NETCONF probe for Zabbix / lab — tuned for Nokia SR Linux (X1b) and generic NETCONF.
+"""NETCONF probe for Zabbix / lab — tuned for Nokia SR Linux and generic NETCONF.
 
 SR Linux containerlab notes
 ---------------------------
