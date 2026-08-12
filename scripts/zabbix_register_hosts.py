@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Register Magic Kingdom X1b bleafs in Zabbix with *native* NETCONF (SSH subsystem).
+"""Register SR Linux hosts in Zabbix with *native* NETCONF (SSH subsystem).
 
 Requires Zabbix **≥ 7.2** (SSH item key 6th parameter: subsystem=netconf).
 
 Creates:
-  Host group: Magic Kingdom
-  Hosts: bleaf1.magic-kingdom.io, bleaf2.magic-kingdom.io
+  Host group: SR Linux Lab (override with --group)
+  Hosts: srl1, srl2 (or --host name:ip)
   SSH agent master items (subsystem netconf) + dependent / simple-check items
 
 Usage:
-  python3 zabbix_register_bleafs.py --url http://localhost:8080
+  python3 zabbix_register_hosts.py --url http://localhost:8080
+  python3 zabbix_register_hosts.py --host leaf1:10.0.0.11 --group 'Nokia SR Linux'
 
 Re-running is idempotent: replaces legacy trapper `netconf.*` items and
 ensures SSH masters + dependents exist.
@@ -41,17 +42,24 @@ VT_UINT = 3
 VT_TEXT = 4
 
 DEFAULT_HOSTS = [
-    {
-        "host": "bleaf1.magic-kingdom.io",
-        "name": "bleaf1 (7250 IXR-X1b / SRL)",
-        "ip": "172.30.40.21",
-    },
-    {
-        "host": "bleaf2.magic-kingdom.io",
-        "name": "bleaf2 (7250 IXR-X1b / SRL)",
-        "ip": "172.30.40.22",
-    },
+    {"host": "srl1", "name": "srl1 (SR Linux)", "ip": "172.30.50.11"},
+    {"host": "srl2", "name": "srl2 (SR Linux)", "ip": "172.30.50.12"},
 ]
+
+
+def parse_hosts(specs: list[str] | None) -> list[dict]:
+    if not specs:
+        return DEFAULT_HOSTS
+    hosts = []
+    for spec in specs:
+        if ":" not in spec:
+            raise SystemExit(f"invalid --host {spec!r}; expected name:ip")
+        name, ip = spec.split(":", 1)
+        name, ip = name.strip(), ip.strip()
+        if not name or not ip:
+            raise SystemExit(f"invalid --host {spec!r}; expected name:ip")
+        hosts.append({"host": name, "name": name, "ip": ip})
+    return hosts
 
 # NETCONF end-of-message framing required by Zabbix SSH subsystem items
 EOM = "]]>]]>"
@@ -235,14 +243,14 @@ def ensure_host(api: ZabbixAPI, groupid: str, host: dict) -> str:
         {"macro": "{$NETCONF_PASSWORD}", "value": "NokiaSrl1!", "type": 0},
     ]
     desc = (
-        "Magic Kingdom containerlab X1b (SR Linux). "
+        "SR Linux lab node. "
         "Metrics via native Zabbix SSH + NETCONF subsystem (not SNMP / not trapper poller)."
     )
     tags = [
-        {"tag": "role", "value": "bleaf"},
-        {"tag": "platform", "value": "7250-IXR-X1b"},
+        {"tag": "role", "value": "leaf"},
+        {"tag": "platform", "value": "srlinux"},
         {"tag": "os", "value": "SR-Linux"},
-        {"tag": "lab", "value": "magic-kingdom"},
+        {"tag": "lab", "value": "zabbix-netconf"},
         {"tag": "monitor", "value": "netconf"},
         {"tag": "netconf", "value": "native-ssh"},
     ]
@@ -636,15 +644,28 @@ def main() -> int:
         action="store_true",
         help="Do not delete existing netconf.* items (default: replace)",
     )
+    ap.add_argument(
+        "--group",
+        default="SR Linux Lab",
+        help="Zabbix host group (default: SR Linux Lab)",
+    )
+    ap.add_argument(
+        "--host",
+        action="append",
+        dest="hosts",
+        metavar="NAME:IP",
+        help="Repeatable host as name:ip (default: srl1/srl2 lab nodes)",
+    )
     args = ap.parse_args()
 
     api = ZabbixAPI(args.url, args.user, args.password)
     check_version(api)
 
-    groupid = ensure_group(api, "Magic Kingdom")
-    print(f"Host group Magic Kingdom id={groupid}")
+    hosts = parse_hosts(args.hosts)
+    groupid = ensure_group(api, args.group)
+    print(f"Host group {args.group} id={groupid}")
 
-    for h in DEFAULT_HOSTS:
+    for h in hosts:
         hostid = ensure_host(api, groupid, h)
         print(f"Host {h['host']} id={hostid}")
         if args.keep_legacy:
@@ -653,7 +674,7 @@ def main() -> int:
 
     print(
         "Done. Native SSH+NETCONF items registered.\n"
-        "Check: Monitoring → Latest data → Magic Kingdom "
+        f"Check: Monitoring → Latest data → {args.group} "
         "(ssh.run masters + netconf.* dependents)."
     )
     return 0

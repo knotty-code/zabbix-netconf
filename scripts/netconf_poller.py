@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""LEGACY: Poll Magic Kingdom bleaf X1bs via NETCONF and push metrics to Zabbix.
+"""LEGACY: Poll SR Linux nodes via NETCONF and push metrics to Zabbix.
 
 The lab compose stack now uses **native Zabbix SSH + NETCONF subsystem items**
-(Zabbix ≥ 7.2). Prefer `zabbix_register_bleafs.py` and the admin guide.
+(Zabbix ≥ 7.2). Prefer `zabbix_register_hosts.py` and the admin guide.
 
 This trapper poller remains for offline demos or Zabbix &lt; 7.2 only.
 
-Designed to run in a netconf-tools container on the magic-kingdom-mgmt network.
+Designed to run in a netconf-tools container on the srl-lab network.
 
 Env:
   ZABBIX_SERVER   default zabbix-server
@@ -28,8 +28,8 @@ from pathlib import Path
 
 # Hosts: Zabbix technical host name → NETCONF target
 TARGETS = [
-    ("bleaf1.magic-kingdom.io", os.environ.get("BLEAF1_IP", "172.30.40.21")),
-    ("bleaf2.magic-kingdom.io", os.environ.get("BLEAF2_IP", "172.30.40.22")),
+    ("srl1", os.environ.get("SRL1_IP", "172.30.50.11")),
+    ("srl2", os.environ.get("SRL2_IP", "172.30.50.12")),
 ]
 
 PROBE = Path(__file__).resolve().parent / "netconf_probe.py"

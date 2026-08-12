@@ -1,7 +1,12 @@
-node_modules/
-package-lock.json
 .DS_Store
 *.log
 .env
 .env.*
 !.env.example
+__pycache__/
+*.pyc
+
+# containerlab runtime
+clab-*/
+*.clab.yml.bak
+lab/.srl-lab.yml.bak

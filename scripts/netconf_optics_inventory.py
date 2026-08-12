@@ -11,8 +11,8 @@ script prints both **live values** and the **modeled** monitoring surface.
 
 Usage
 -----
-  python3 netconf_optics_inventory.py --host 172.30.40.21
-  python3 netconf_optics_inventory.py --host bleaf1.magic-kingdom.io --port 22
+  python3 netconf_optics_inventory.py --host 172.30.50.11
+  python3 netconf_optics_inventory.py --host srl1 --port 22
 """
 from __future__ import annotations
 
@@ -143,7 +143,7 @@ MODELED = {
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", action="append", dest="hosts", help="Repeatable; default both bleafs")
+    ap.add_argument("--host", action="append", dest="hosts", help="Repeatable; default both lab nodes")
     ap.add_argument("--port", type=int, default=22)
     ap.add_argument("--user", default="admin")
     ap.add_argument("--password", default="NokiaSrl1!")
@@ -151,7 +151,7 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="Machine-readable full dump")
     ap.add_argument("--show-ports", action="store_true", help="Print every port row")
     args = ap.parse_args()
-    hosts = args.hosts or ["172.30.40.21", "172.30.40.22"]
+    hosts = args.hosts or ["172.30.50.11", "172.30.50.12"]
 
     results = []
     for h in hosts:
@@ -165,7 +165,7 @@ def main() -> int:
         return 0
 
     print("=" * 72)
-    print("NETCONF optics exploration — SR Linux X1b")
+    print("NETCONF optics exploration — SR Linux")
     print("=" * 72)
     print("\n## Modeled surface (YANG — available when optic present)")
     for section, leaves in MODELED.items():

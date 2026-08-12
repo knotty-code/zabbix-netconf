@@ -112,7 +112,7 @@ NETCONF poller (ncclient) ──► X1b
         └── zabbix_sender / trapper ──► Zabbix server or proxy
 ```
 
-This repository’s **lab** stack (repo root: `docker-compose.yml`, `scripts/`) uses the **same native SSH+NETCONF path** (Compose: Zabbix **7.4**, `ZBX_STARTSSH`, `zabbix_register_bleafs.py`). The legacy poller script remains only as a reference for Zabbix &lt; 7.2.
+This repository’s **lab** stack (repo root: `docker-compose.yml`, `lab/srl.clab.yml`, `scripts/`) uses the **same native SSH+NETCONF path** (Compose: Zabbix **7.4**, `ZBX_STARTSSH`, `zabbix_register_hosts.py`). The legacy poller script remains only as a reference for Zabbix &lt; 7.2.
 
 ### 3.4 Pattern summary
 
@@ -270,12 +270,12 @@ Avoid inventing YANG namespace URIs unless you know the exact URN—incorrect na
 
 | Field | Recommendation |
 |-------|----------------|
-| **Host name** (technical) | Stable ID, e.g. `site-a-bleaf-01.example.com` |
-| **Visible name** | Human label, e.g. `Site A · BLeaf-01 · 7250 IXR-X1b` |
-| **Groups** | e.g. `Nokia SR Linux`, `Border leaf`, site/region |
+| **Host name** (technical) | Stable ID, e.g. `site-a-srl-01.example.com` |
+| **Visible name** | Human label, e.g. `Site A · Leaf-01 · SR Linux` |
+| **Groups** | e.g. `Nokia SR Linux`, `Leaf`, site/region |
 | **Interface** | Agent (or other) interface with **management IP**—required by Zabbix even for SSH items |
 | **Proxy** | Regional proxy if used |
-| **Tags** | `platform=7250-IXR-X1b`, `os=SR-Linux`, `monitor=netconf`, `role=bleaf` |
+| **Tags** | `platform=srlinux`, `os=SR-Linux`, `monitor=netconf`, `role=leaf` |
 | **Macros** | See §7.2 |
 
 Do **not** attach SNMP interfaces for this path unless you intentionally dual-stack later.
@@ -665,11 +665,11 @@ Helpers in this repository for demos and script reuse—not required when using 
 |------|------|
 | `README.md` | Lab stack quick start (native SSH NETCONF) |
 | `docker-compose.yml` | Zabbix 7.4 + Postgres; `ZBX_STARTSSH` |
-| `scripts/zabbix_register_bleafs.py` | API: hosts + `ssh.run[...,netconf]` + dependents |
+| `lab/srl.clab.yml` | Optional two-node SR Linux containerlab |
+| `scripts/zabbix_register_hosts.py` | API: hosts + `ssh.run[...,netconf]` + dependents |
 | `scripts/netconf_probe.py` | Optional capability / hostname probes |
 | `scripts/netconf_optics_inventory.py` | Optional optics inventory |
 | `scripts/netconf_poller.py` | **Legacy** trapper poller (fallback only) |
-| `Zabbix-Lab-NETCONF-Overview.pptx` | Slide overview of the lab |
 
 Official Zabbix references:
 
@@ -686,5 +686,5 @@ Official Zabbix references:
 | **Title** | Zabbix administrator guide: Onboarding Nokia 7250 IXR-X1b with NETCONF |
 | **Primary method** | Zabbix ≥ 7.2 SSH agent + subsystem `netconf` |
 | **Intended use** | Customer Zabbix operations / professional services runbook |
-| **Related lab** | Magic Kingdom containerlab (optional; native SSH NETCONF) |
+| **Related lab** | Two-node SR Linux containerlab in this repo (`lab/srl.clab.yml`) |
 | **Revision note** | Lab stack migrated from poller→trapper to native `ssh.run[...,netconf]` (Zabbix 7.4, StartSSH, SRL client hello + YANG namespaces, `ZBX_TIMEOUT`) |

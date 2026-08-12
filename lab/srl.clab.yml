@@ -1,0 +1,31 @@
+# Two SR Linux nodes for the Zabbix NETCONF lab.
+# No fabric, no spines — just mgmt reachability plus one interconnect.
+#
+#   sudo containerlab deploy -t lab/srl.clab.yml
+#   sudo containerlab destroy -t lab/srl.clab.yml --cleanup
+#
+name: srl-lab
+prefix: ""
+
+mgmt:
+  network: srl-lab
+  ipv4-subnet: 172.30.50.0/24
+
+topology:
+  kinds:
+    nokia_srlinux:
+      image: ghcr.io/nokia/srlinux:26.3.1
+      type: ixrd2l
+  defaults:
+    kind: nokia_srlinux
+
+  nodes:
+    srl1:
+      mgmt-ipv4: 172.30.50.11
+      startup-config: startup/srl1.cfg
+    srl2:
+      mgmt-ipv4: 172.30.50.12
+      startup-config: startup/srl2.cfg
+
+  links:
+    - endpoints: ["srl1:e1-1", "srl2:e1-1"]

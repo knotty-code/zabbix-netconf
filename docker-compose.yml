@@ -1,12 +1,12 @@
-# Zabbix lab stack — native NETCONF (SSH subsystem) for Magic Kingdom X1b bleafs
+# Zabbix lab stack — native NETCONF (SSH subsystem) for SR Linux.
 # Web UI: http://localhost:8080  (Admin / zabbix)
 #
 # Requires Zabbix ≥ 7.2 (subsystem parameter on SSH items).
-# Start:  docker compose up -d
+# Deploy the two-node lab first so the srl-lab network exists:
+#   sudo containerlab deploy -t lab/srl.clab.yml
+#   docker compose up -d
+#   python3 scripts/zabbix_register_hosts.py --url http://localhost:8080
 # Stop:   docker compose down
-#
-# After first start (or upgrade from 7.0):
-#   python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
 #
 # Note: upgrading major Zabbix images against an old Postgres volume auto-migrates
 # schema on server start. If the UI fails after a major jump, recreate the volume:
@@ -54,19 +54,17 @@ services:
       ZBX_TIMEOUT: "30"
       ZBX_CACHESIZE: 128M
       ZBX_STARTVMWARECOLLECTORS: "0"
-      # Optional: directory for public-key auth (password used in lab)
-      # ZBX_SSHKEYLOCATION: /var/lib/zabbix/ssh_keys
     volumes:
       - ./externalchecks:/usr/lib/zabbix/externalscripts:ro
       - ./scripts:/scripts:ro
     ports:
       - "10051:10051"
     extra_hosts:
-      - "bleaf1.magic-kingdom.io:172.30.40.21"
-      - "bleaf2.magic-kingdom.io:172.30.40.22"
+      - "srl1:172.30.50.11"
+      - "srl2:172.30.50.12"
     networks:
       - zabbix-net
-      - magic-kingdom-mgmt
+      - srl-lab
 
   zabbix-web:
     image: zabbix/zabbix-web-nginx-pgsql:alpine-7.4-latest
@@ -84,12 +82,8 @@ services:
       PHP_TZ: UTC
     ports:
       - "8080:8080"
-    extra_hosts:
-      - "bleaf1.magic-kingdom.io:172.30.40.21"
-      - "bleaf2.magic-kingdom.io:172.30.40.22"
     networks:
       - zabbix-net
-      - magic-kingdom-mgmt
 
   # Optional offline tools (ncclient probes only — not in the data path)
   netconf-tools:
@@ -103,19 +97,19 @@ services:
       bash -c "pip install --no-cache-dir -q ncclient lxml paramiko &&
                sleep infinity"
     extra_hosts:
-      - "bleaf1.magic-kingdom.io:172.30.40.21"
-      - "bleaf2.magic-kingdom.io:172.30.40.22"
+      - "srl1:172.30.50.11"
+      - "srl2:172.30.50.12"
     networks:
       - zabbix-net
-      - magic-kingdom-mgmt
+      - srl-lab
 
 networks:
   zabbix-net:
     driver: bridge
-  # containerlab Magic Kingdom management network (external)
-  magic-kingdom-mgmt:
+  # containerlab management network (created by `containerlab deploy`)
+  srl-lab:
     external: true
-    name: magic-kingdom-mgmt
+    name: srl-lab
 
 volumes:
   zabbix-postgres-data:

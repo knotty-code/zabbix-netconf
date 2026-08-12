@@ -5,21 +5,21 @@ SR Linux containerlab notes
 ---------------------------
 * NETCONF rides SSH subsystem on **port 22** (not 830) when
   `system netconf-server <name> { admin-state enable; ssh-server <ssh>; }` is set.
-* Credentials for Magic Kingdom lab: admin / NokiaSrl1!
+* Lab credentials: admin / NokiaSrl1!
 * Prefer small subtree filters — unfiltered <get> can be 10+ MB.
 
 Examples
 --------
   # Connectivity / capability count
-  python3 netconf_probe.py --host 172.30.40.21 --user admin --password 'NokiaSrl1!' \\
+  python3 netconf_probe.py --host 172.30.50.11 --user admin --password 'NokiaSrl1!' \\
       --port 22 --mode caps
 
   # Hostname via SR Linux native YANG subtree
-  python3 netconf_probe.py --host bleaf1.magic-kingdom.io --user admin --password 'NokiaSrl1!' \\
+  python3 netconf_probe.py --host srl1 --user admin --password 'NokiaSrl1!' \\
       --port 22 --mode hostname
 
   # Interface oper-state summary (count up/down)
-  python3 netconf_probe.py --host 172.30.40.21 --user admin --password 'NokiaSrl1!' \\
+  python3 netconf_probe.py --host 172.30.50.11 --user admin --password 'NokiaSrl1!' \\
       --port 22 --mode if-summary
 """
 from __future__ import annotations

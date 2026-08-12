@@ -1,26 +1,26 @@
 # zabbix-netconf
 
-Native **Zabbix ≥ 7.2** NETCONF monitoring (SSH agent + subsystem `netconf`) for **Nokia SR Linux** / **7250 IXR-X1b**, plus a Docker lab that demos Magic Kingdom containerlab border leafs.
+Native **Zabbix ≥ 7.2** NETCONF monitoring (SSH agent + subsystem `netconf`) for **Nokia SR Linux**, plus a small Docker + containerlab demo.
 
 | Doc | Purpose |
 |-----|---------|
-| **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md)** · [`.docx`](./ZABBIX-NETCONF-ADMIN-GUIDE.docx) | Customer/admin guide: onboard X1b to an **existing** Zabbix estate |
+| **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md)** | Customer/admin guide: onboard SR Linux (including 7250 IXR-X1b) to an **existing** Zabbix estate |
 | **This README** | Lab/demo stack quick start |
-| [Zabbix-Lab-NETCONF-Overview.pptx](./Zabbix-Lab-NETCONF-Overview.pptx) | Slide overview |
 
 **Primary path:** `ssh.run[...,netconf]` — no external poller required on Zabbix 7.2+.  
 **Lab image:** Zabbix **7.4** Alpine (`ZBX_STARTSSH`, `ZBX_TIMEOUT=30`).
 
 ---
 
-## Lab targets (Magic Kingdom)
+## Lab targets
+
+Two standalone SR Linux nodes (`lab/srl.clab.yml`). One interconnect, no spines or fabric.
 
 | Host (Zabbix) | Role | Mgmt IP | Platform |
 |---------------|------|---------|----------|
-| `bleaf1.magic-kingdom.io` | bleaf | **172.30.40.21** | 7250 IXR-X1b · SR Linux 26.3.1 |
-| `bleaf2.magic-kingdom.io` | bleaf | **172.30.40.22** | 7250 IXR-X1b · SR Linux 26.3.1 |
+| `srl1` | leaf | **172.30.50.11** | SR Linux 26.3.1 (`ixrd2l`) |
+| `srl2` | leaf | **172.30.50.12** | SR Linux 26.3.1 (`ixrd2l`) |
 
-Lab topo: Magic Kingdom containerlab (`magic-kingdom.clab.yml` in the magic-kingdom repo).  
 Credentials (lab only): **admin** / **NokiaSrl1!**
 
 ---
@@ -31,11 +31,14 @@ Credentials (lab only): **admin** / **NokiaSrl1!**
 git clone git@github.com:knotty-code/zabbix-netconf.git
 cd zabbix-netconf
 
-# Requires containerlab network magic-kingdom-mgmt (lab already deployed)
+# 1. Two SR Linux nodes + Docker network srl-lab
+sudo containerlab deploy -t lab/srl.clab.yml
+
+# 2. Zabbix (joins srl-lab so it can reach the nodes)
 docker compose up -d
 
-# Wait until UI answers, then register hosts + native SSH/NETCONF items
-python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
+# 3. Wait until UI answers, then register hosts + native SSH/NETCONF items
+python3 scripts/zabbix_register_hosts.py --url http://localhost:8080
 ```
 
 | Service | URL / port |
@@ -44,7 +47,7 @@ python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
 | Server | TCP **10051** |
 | SSH pollers | `ZBX_STARTSSH=5` inside `zabbix-server` |
 
-**Data → Monitoring → Latest data → Host group “Magic Kingdom”**
+**Data → Monitoring → Latest data → Host group “SR Linux Lab”**
 
 ### Fresh DB after major Zabbix image jump
 
@@ -52,7 +55,15 @@ python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
 docker compose down -v   # wipe volume if schema migration fails
 docker compose pull
 docker compose up -d
-python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
+python3 scripts/zabbix_register_hosts.py --url http://localhost:8080
+```
+
+### Tear down
+
+```bash
+docker compose down          # keep DB volume
+docker compose down -v       # wipe Zabbix DB
+sudo containerlab destroy -t lab/srl.clab.yml --cleanup
 ```
 
 ---
@@ -61,8 +72,8 @@ python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
 
 ```
 ┌─────────────────────┐   SSH subsystem netconf :22   ┌──────────────┐
-│ zabbix-server       │ ────────────────────────────► │ bleaf1 X1b   │
-│ SSH pollers         │ ────────────────────────────► │ bleaf2 X1b   │
+│ zabbix-server       │ ────────────────────────────► │ srl1         │
+│ SSH pollers         │ ────────────────────────────► │ srl2         │
 │ (StartSSH ≥ 1)      │                               └──────────────┘
 └─────────┬───────────┘
           │ raw XML → JS/JSONPath preprocessing
@@ -71,7 +82,7 @@ python3 scripts/zabbix_register_bleafs.py --url http://localhost:8080
 ┌─────────────────────┐     UI :8080                  ┌──────────────┐
 │ postgres            │ ◄───────────────────────────► │ zabbix-web   │
 └─────────────────────┘                               └──────────────┘
-   (server + web joined to docker network magic-kingdom-mgmt)
+   (server joined to docker network srl-lab)
 ```
 
 Optional offline probes (not on the data path):
@@ -79,7 +90,7 @@ Optional offline probes (not on the data path):
 ```bash
 docker compose --profile tools up -d netconf-tools
 docker exec -it zabbix-netconf-tools python3 /scripts/netconf_probe.py \
-  --host 172.30.40.21 --user admin --password 'NokiaSrl1!' --mode hostname
+  --host 172.30.50.11 --user admin --password 'NokiaSrl1!' --mode hostname
 ```
 
 Legacy `scripts/netconf_poller.py` (trapper push) remains for Zabbix &lt; 7.2 only.
@@ -102,11 +113,21 @@ Legacy `scripts/netconf_poller.py` (trapper push) remains for Zabbix &lt; 7.2 on
 
 Macros: `{$NETCONF.IP}`, `{$NETCONF.PORT}`, `{$NETCONF.USER}`, `{$NETCONF.PASSWORD}`.
 
+Register extra devices (or skip the lab defaults):
+
+```bash
+python3 scripts/zabbix_register_hosts.py \
+  --url http://localhost:8080 \
+  --group 'Nokia SR Linux' \
+  --host leaf1:10.0.0.11 \
+  --host leaf2:10.0.0.12
+```
+
 ---
 
-## NETCONF on the X1bs
+## NETCONF on SR Linux
 
-SR Linux NETCONF is an **SSH subsystem** on **port 22** (not classic 830):
+SR Linux NETCONF is an **SSH subsystem** on **port 22** (not classic 830). The lab startup configs already set this:
 
 ```text
 system netconf-server mgmt {
@@ -115,21 +136,19 @@ system netconf-server mgmt {
 }
 ```
 
-If EDA reconciles config, keep this in the source of truth.
+If a controller reconciles config, keep this in the source of truth.
 
 ---
 
 ## Compose notes
 
-- External network **`magic-kingdom-mgmt`** must exist (containerlab).
-- `extra_hosts` maps `bleaf*.magic-kingdom.io` → lab mgmt IPs.
+- External network **`srl-lab`** must exist (created by containerlab).
+- `extra_hosts` maps `srl1` / `srl2` → lab mgmt IPs.
 - Images: **Zabbix 7.4** Alpine (pgsql) + Postgres 16.
 - `ZBX_STARTSSH=5`, `ZBX_TIMEOUT=30` (NETCONF hello needs more than default 3s).
 
 ```bash
 docker compose logs -f zabbix-server
-docker compose down          # keep DB volume
-docker compose down -v       # wipe Zabbix DB
 ```
 
 ---
@@ -138,13 +157,14 @@ docker compose down -v       # wipe Zabbix DB
 
 | Path | Role |
 |------|------|
-| `ZABBIX-NETCONF-ADMIN-GUIDE.md` / `.docx` | Customer onboarding handbook |
-| `docker-compose.yml` | Lab stack |
-| `scripts/zabbix_register_bleafs.py` | API: hosts + native SSH items |
+| `ZABBIX-NETCONF-ADMIN-GUIDE.md` | Customer onboarding handbook |
+| `lab/srl.clab.yml` | Two-node SR Linux topology |
+| `lab/startup/` | Enable NETCONF on each node |
+| `docker-compose.yml` | Lab Zabbix stack |
+| `scripts/zabbix_register_hosts.py` | API: hosts + native SSH items |
 | `scripts/netconf_probe.py` | Optional offline probe |
 | `scripts/netconf_optics_inventory.py` | Optional optics inventory |
 | `scripts/netconf_poller.py` | Legacy trapper poller |
-| `build-zabbix-lab-pptx.js` | Regenerates the PowerPoint (`npm run build:pptx`) |
 | `externalchecks/` | Optional external-check stubs |
 
 ---
