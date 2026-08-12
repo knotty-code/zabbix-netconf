@@ -443,13 +443,25 @@ return n;
 
 ### 7.6 Add a new check (recipe)
 
-This section is the walkthrough. §7.3–§7.5 are the field reference. The example below is **system timezone** — a leaf that is **not** in the starter set — so the steps stay visible.
+Do this in the **Zabbix UI**. You will create two items on one host: an SSH master that returns XML, and a dependent that stores one parsed leaf. There is no menu item named “NETCONF”.
 
-**What you are adding:** one master item that GETs `/system/clock/timezone`, and one dependent item `netconf.timezone` that stores the parsed string.
+Worked example: **system timezone**. Live lab reply (SR Linux 26.3) is:
 
-#### 1. See the live XML first
+```xml
+<data xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <system xmlns="urn:nokia.com:srlinux:general:system">
+    <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+      <timezone>UTC</timezone>
+    </clock>
+  </system>
+</data>
+```
 
-Run the probe from the same host that will poll (Zabbix server/proxy, or the lab `netconf-tools` container). Prefer a **bare** subtree filter until you know the URN (§6.3):
+Copy those **xmlns** values into the RPC filter. Do not invent URNs.
+
+#### 1. Confirm the leaf (probe)
+
+From the poller host (or the lab repo root):
 
 ```bash
 python3 scripts/netconf_probe.py \
@@ -458,28 +470,33 @@ python3 scripts/netconf_probe.py \
   --mode get --xpath '<system><clock><timezone/></clock></system>'
 ```
 
-You should see a `<timezone>…</timezone>` value (for example `UTC` or `America/Los_Angeles`). If the reply is an `rpc-error` or empty `<data/>`, change the filter — do not invent namespace URIs.
+Stop here if you do not see `<timezone>…</timezone>`.
 
-#### 2. Create the SSH master in the UI
+#### 2. Open the host’s item list
 
-**Data collection → Hosts →** the device **→ Items → Create item**
+1. Zabbix UI → **Data collection → Hosts**.
+2. On the target host row, click **Items** (not the hostname).
+3. **Create item**.
 
-| Field | Value |
-|-------|--------|
+#### 3. Create the SSH master — set every field below
+
+Selecting **Type = SSH agent** reveals Username, Password, and Executed script.
+
+| Field | Exact value |
+|-------|-------------|
 | **Name** | `NETCONF: Get timezone (raw)` |
-| **Type** | SSH agent |
+| **Type** | `SSH agent` |
 | **Key** | `ssh.run[SrlTimezone,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]` |
-| **Username** | `{$NETCONF.USER}` |
-| **Authentication method** | Password |
-| **Password** | `{$NETCONF.PASSWORD}` |
-| **Type of information** | Text |
+| **Type of information** | `Text` |
 | **Update interval** | `5m` |
-| **Timeout** | `30s` (server `Timeout` / `ZBX_TIMEOUT` must be at least this) |
-| **Executed script** | The block below — paste the whole thing |
+| **Username** | `{$NETCONF.USER}` |
+| **Authentication method** | `Password` |
+| **Password** | `{$NETCONF.PASSWORD}` |
+| **Timeout** | `30s` (server `Timeout` / `ZBX_TIMEOUT` must be ≥ 30) |
 
-The first key parameter (`SrlTimezone`) must be **unique on this host**. The sixth parameter must be **`netconf`**.
+Key rules: first parameter (`SrlTimezone`) is unique **per host**; sixth parameter is the literal `netconf`; do not omit the empty encoding/options commas.
 
-**Executed script** (same framing as `rpc_get()` in `scripts/zabbix_register_hosts.py`):
+**Executed script** — paste the entire block, including every `]]>]]>` line. This is not a shell command.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -492,8 +509,8 @@ The first key parameter (`SrlTimezone`) must be **unique on this host**. The six
 <rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
   <get>
     <filter type="subtree">
-      <system>
-        <clock>
+      <system xmlns="urn:nokia.com:srlinux:general:system">
+        <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
           <timezone/>
         </clock>
       </system>
@@ -507,23 +524,34 @@ The first key parameter (`SrlTimezone`) must be **unique on this host**. The six
 ]]>]]>
 ```
 
-Announce **only** `base:1.0` in the hello. If the client also claims 1.1, the session uses chunked framing and the `]]>]]>` markers (and your regex) will not match.
+Hello must announce **only** `base:1.0`. If you also advertise 1.1, the device uses chunked framing and Test/preprocessing will fail.
 
-Use **Test** on the item. A good result is XML containing `<timezone>`. Then save.
+Then:
 
-#### 3. Create the dependent item
+1. **Test → Get value and test**.
+2. Pass = XML containing `<timezone>UTC</timezone>` (or another zone name).
+3. Close Test → **Add**.
 
-On the same host: **Create item**, type **Dependent item**, master = `NETCONF: Get timezone (raw)`.
+Do not create the dependent until Test succeeds.
 
-| Field | Value |
-|-------|--------|
+#### 4. Create the dependent — set every field below
+
+**Create item** again on the same host.
+
+| Field | Exact value |
+|-------|-------------|
 | **Name** | `NETCONF timezone` |
-| **Type** | Dependent item |
+| **Type** | `Dependent item` |
 | **Key** | `netconf.timezone` |
-| **Type of information** | Character |
-| **Master item** | `NETCONF: Get timezone (raw)` |
+| **Type of information** | `Character` |
+| **Master item** | **Select** → `NETCONF: Get timezone (raw)` |
 
-**Preprocessing** — one JavaScript step:
+**Preprocessing** tab → **Add**:
+
+| Field | Exact value |
+|-------|-------------|
+| **Name** | `JavaScript` |
+| **Script** | see below |
 
 ```javascript
 var m = value.match(/<timezone>([^<]+)<\/timezone>/);
@@ -531,32 +559,50 @@ if (m) return m[1].trim();
 return value.slice(0, 200);
 ```
 
-Regex alternative: pattern `<timezone>([^<]+)</timezone>`, output `\1`.
+Regex alternative: type **Regular expression**, pattern `<timezone>([^<]+)</timezone>`, output `\1`.
 
-#### 4. Confirm it works
+**Add**.
 
-1. **Monitoring → Latest data** for the host.  
-2. Master `ssh.run[SrlTimezone,…]` updates and is **not Unsupported**.  
-3. `netconf.timezone` shows the parsed zone, not the raw XML.
+#### 5. Confirm in Latest data
+
+1. **Monitoring → Latest data**.
+2. Filter to the host.
+3. Name contains `timezone`.
+4. Master shows XML and is **not Unsupported**.
+5. `netconf.timezone` shows `UTC` (or the device zone), not the raw XML.
+
+#### Repeat for a different leaf
+
+1. Probe the new subtree until you have a reply with the leaf you want.  
+2. Put that subtree, including the `xmlns` values from the reply, inside the master’s `<filter>`.  
+3. Change the first `ssh.run[…]` parameter (must stay unique).  
+4. Point a new dependent at that master and match the new tag in JS/regex.
 
 #### Common failures
 
 | Symptom | Likely cause |
 |---------|----------------|
 | Master **Unsupported** / timeout | `ZBX_TIMEOUT` too low; filter too wide; NETCONF not enabled |
-| Empty `<data/>` or `Unknown namespace` | Wrong or invented YANG URN — start with a bare filter |
+| Empty `<data/>` or `Unknown namespace` | Wrong YANG URN — use the xmlns from the probe reply |
 | Regex/JS returns garbage or chunk headers | Hello advertised **1.1**; announce **only** `base:1.0` |
 | Reply is truncated / item error | Missing `]]>]]>` after each RPC, or no `<close-session/>` |
 | “Item already exists” | First `ssh.run[…]` parameter not unique on the host |
+| Test works, Latest data empty | Interval not elapsed — use **Execute now** on the master |
 
 Per-interface or per-optic checks are the same pattern plus **LLD** later (§13). Do not start there.
 
 #### Persist it in the lab
 
-The UI items disappear if you wipe the Zabbix DB. To recreate them with `zabbix_register_hosts.py`, add a filter and a JS snippet next to the existing `RPC_*` / `JS_*` constants, then call the same helpers used for hostname:
+UI items disappear if you wipe the Zabbix DB. To recreate them with `zabbix_register_hosts.py`, add the filter (with the live namespaces) next to the existing `RPC_*` / `JS_*` constants, then call the same helpers used for hostname:
 
 ```python
-RPC_TIMEZONE = rpc_get("<system><clock><timezone/></clock></system>")
+NS_SYSTEM = "urn:nokia.com:srlinux:general:system"
+NS_NTP = "urn:nokia.com:srlinux:linux:ntp"
+RPC_TIMEZONE = rpc_get(
+    f'<system xmlns="{NS_SYSTEM}">'
+    f'<clock xmlns="{NS_NTP}"><timezone/></clock>'
+    f"</system>"
+)
 JS_TIMEZONE = r"""
 var m = value.match(/<timezone>([^<]+)<\/timezone>/);
 if (m) return m[1].trim();

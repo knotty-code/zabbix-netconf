@@ -113,30 +113,133 @@ Legacy `scripts/netconf_poller.py` (trapper push) remains for Zabbix &lt; 7.2 on
 
 Macros: `{$NETCONF.IP}`, `{$NETCONF.PORT}`, `{$NETCONF.USER}`, `{$NETCONF.PASSWORD}`.
 
-To add another row, see **Add a check** below.
+To add another metric, create **two items in the Zabbix UI** (not a new item type). Worked example below: **timezone** on `srl1`.
 
-### Add a check
+### Add a check (timezone, in the UI)
 
-A NETCONF check is two Zabbix items: a master that fetches XML, and a dependent that parses one field.
+A check is (1) an **SSH agent** master that returns raw NETCONF XML, plus (2) a **dependent** item that extracts one leaf.
 
-1. **Pick a small YANG subtree** (one leaf or container). Probe it first so you know the XML:
+This example is already proven against the lab:
 
-   ```bash
-   python3 scripts/netconf_probe.py \
-     --host 172.30.50.11 --user admin --password 'NokiaSrl1!' \
-     --mode get --xpath '<system><clock><timezone/></clock></system>'
-   ```
+```bash
+python3 scripts/netconf_probe.py \
+  --host 172.30.50.11 --user admin --password 'NokiaSrl1!' \
+  --mode get --xpath '<system><clock><timezone/></clock></system>'
+```
 
-2. **Create an SSH agent master** on the host. Key:
-   `ssh.run[<unique name>,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]`  
-   Username / password = the `{$NETCONF.*}` macros.  
-   **Executed script** is not a shell command — it is a client hello + `<get>` + `]]>]]>` + `<close-session/>`.
+Expected reply (namespaces matter — copy them into the RPC):
 
-3. **Create a dependent item** on that master. Use JavaScript or regex preprocessing to pull one tag (for example `<timezone>…</timezone>`).
+```xml
+<data …>
+  <system xmlns="urn:nokia.com:srlinux:general:system">
+    <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+      <timezone>UTC</timezone>
+    </clock>
+  </system>
+</data>
+```
 
-4. Open **Monitoring → Latest data**. The master must not be **Unsupported**; the dependent should show the parsed value.
+#### 1. Open the host’s item list
 
-Full field table, copy-paste RPC, and a timezone walkthrough: **[ZABBIX-NETCONF-ADMIN-GUIDE.md](./ZABBIX-NETCONF-ADMIN-GUIDE.md#76-add-a-new-check-recipe)**.
+1. Browse to http://localhost:8080 and sign in (**Admin** / **zabbix**).
+2. Left menu: **Data collection → Hosts**.
+3. On the **srl1** row, click **Items** (the Items link, not the hostname).
+4. Click **Create item** (upper right).
+
+#### 2. Create the master (raw XML)
+
+Set these fields. Leave anything not listed at the default.
+
+| Field | Exact value |
+|-------|-------------|
+| **Name** | `NETCONF: Get timezone (raw)` |
+| **Type** | `SSH agent` |
+| **Key** | `ssh.run[SrlTimezone,{$NETCONF.IP},{$NETCONF.PORT},,,netconf]` |
+| **Type of information** | `Text` |
+| **Update interval** | `5m` |
+| **Username** | `{$NETCONF.USER}` |
+| **Authentication method** | `Password` |
+| **Password** | `{$NETCONF.PASSWORD}` |
+| **Executed script** | paste the block under this table |
+| **Timeout** | `30s` |
+
+The sixth key parameter must be the literal word `netconf`. The first parameter (`SrlTimezone`) must be unique on this host.
+
+**Executed script** — paste *all* of this, including every `]]>]]>` line:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+  <capabilities>
+    <capability>urn:ietf:params:netconf:base:1.0</capability>
+  </capabilities>
+</hello>
+]]>]]>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
+  <get>
+    <filter type="subtree">
+      <system xmlns="urn:nokia.com:srlinux:general:system">
+        <clock xmlns="urn:nokia.com:srlinux:linux:ntp">
+          <timezone/>
+        </clock>
+      </system>
+    </filter>
+  </get>
+</rpc>
+]]>]]>
+<rpc xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="2">
+  <close-session/>
+</rpc>
+]]>]]>
+```
+
+Then:
+
+1. Click **Test** at the bottom.
+2. **Get value and test**. You want XML that contains `<timezone>UTC</timezone>`.
+3. Close the test dialog and click **Add**.
+
+If Test fails, do not create the dependent yet. Typical causes: `ZBX_TIMEOUT` below 30s, missing `]]>]]>`, or a typo in the key (especially the trailing `,netconf`).
+
+#### 3. Create the dependent (parsed value)
+
+Still on **srl1 → Items**, click **Create item** again.
+
+| Field | Exact value |
+|-------|-------------|
+| **Name** | `NETCONF timezone` |
+| **Type** | `Dependent item` |
+| **Key** | `netconf.timezone` |
+| **Type of information** | `Character` |
+| **Master item** | click **Select** → choose `NETCONF: Get timezone (raw)` |
+
+Open the **Preprocessing** tab → **Add**:
+
+| Field | Exact value |
+|-------|-------------|
+| **Name** | `JavaScript` |
+| **Script** | the block below |
+
+```javascript
+var m = value.match(/<timezone>([^<]+)<\/timezone>/);
+if (m) return m[1].trim();
+return value.slice(0, 200);
+```
+
+Click **Add**.
+
+#### 4. Confirm the value
+
+1. Left menu: **Monitoring → Latest data**.
+2. Hosts: **srl1** (or host group **SR Linux Lab**).
+3. Name filter: `timezone`.
+4. You should see:
+   - `NETCONF: Get timezone (raw)` — a blob of XML, status not **Unsupported**
+   - `NETCONF timezone` — **`UTC`**
+
+That is the whole pattern. For a different leaf: probe it, put that subtree (with the namespaces from the reply) in the master’s `<filter>`, give the `ssh.run[…]` a new first parameter, and change the JS to match the new tag.
+
+Production field notes and failure table: [admin guide §7.6](./ZABBIX-NETCONF-ADMIN-GUIDE.md#76-add-a-new-check-recipe).
 
 Register extra devices (or skip the lab defaults):
 
